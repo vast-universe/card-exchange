@@ -12,6 +12,13 @@ const DEV_DEFAULTS = {
   TURNSTILE_SECRET_KEY: "",
 } as const;
 
+const INSECURE_DEFAULTS = new Set([
+  "change-me-admin",
+  "dev-session-secret",
+  "dev-card-hash-secret",
+  "change-me-supply-token",
+]);
+
 type SecretKey =
   | "ADMIN_PASSWORD"
   | "SESSION_SECRET"
@@ -78,6 +85,13 @@ export async function getSecret(name: SecretKey) {
   const value = env[name] ?? process.env[name];
 
   if (typeof value === "string" && value.length > 0) {
+    // 在生产环境检查是否使用了不安全的默认值
+    if (process.env.NODE_ENV === "production" && INSECURE_DEFAULTS.has(value)) {
+      throw new AppError(
+        `${name} 使用了不安全的默认值，请在生产环境配置正确的密钥`,
+        500,
+      );
+    }
     return value;
   }
 

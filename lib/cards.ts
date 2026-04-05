@@ -333,7 +333,7 @@ export async function findCardByCode(cardCode: string) {
 
 export async function acquireCardLock(cardId: number) {
   const now = nowIso();
-  const lockUntil = new Date(Date.now() + 15_000).toISOString();
+  const lockUntil = new Date(Date.now() + 30_000).toISOString(); // 增加到30秒
 
   const locked = await queryFirst<{ id: number }>(
     `

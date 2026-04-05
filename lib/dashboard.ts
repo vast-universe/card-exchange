@@ -53,9 +53,11 @@ export async function getDashboardStats(): Promise<DashboardStats> {
           ELSE 0
         END
       ) AS issued,
-      COUNT(DISTINCT bindings.card_id) AS used
+      (
+        SELECT COUNT(DISTINCT card_id)
+        FROM bindings
+      ) AS used
     FROM cards
-    LEFT JOIN bindings ON bindings.card_id = cards.id
   `);
 
   const today = await queryFirst<{
@@ -72,12 +74,15 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     externalDeliveryCount: number | string;
   }>(`
     SELECT
-      SUM(
-        CASE
-          WHEN delivered_at IS NOT NULL
-            AND date(delivered_at, '+8 hours') = date('now', '+8 hours') THEN 1
-          ELSE 0
-        END
+      COALESCE(
+        SUM(
+          CASE
+            WHEN delivered_at IS NOT NULL
+              AND date(delivered_at, '+8 hours') = date('now', '+8 hours') THEN 1
+            ELSE 0
+          END
+        ),
+        0
       ) AS externalDeliveryCount
     FROM cards
   `);

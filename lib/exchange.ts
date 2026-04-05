@@ -329,8 +329,13 @@ export async function redeemCardByCode(cardCode: string) {
           const account = batchResults[j];
           
           if (!account) {
+            const allocated = i + j;
+            console.error(
+              `[redeemCardByCode] 账号分配失败: cardId=${card.id}, poolCode=${card.pool_code}, ` +
+              `需要=${accountQuantity}, 已分配=${allocated}, 失败位置=${i + j + 1}`
+            );
             throw new AppError(
-              `账号分配失败，已分配 ${i + j} / ${accountQuantity} 个账号。`,
+              `账号分配失败，已分配 ${allocated} / ${accountQuantity} 个账号，请联系管理员补充账号。`,
               409,
             );
           }
@@ -338,6 +343,11 @@ export async function redeemCardByCode(cardCode: string) {
           allocatedAccounts.push(account);
         }
       }
+
+      console.log(
+        `[redeemCardByCode] 成功分配账号: cardId=${card.id}, poolCode=${card.pool_code}, ` +
+        `数量=${allocatedAccounts.length}`
+      );
 
       // Add all accounts to card_account_pool
       await allocateAccountsToCard({
@@ -373,6 +383,10 @@ export async function redeemCardByCode(cardCode: string) {
       };
     } catch (error) {
       // Rollback: release all allocated accounts
+      console.error(
+        `[redeemCardByCode] 回滚账号分配: cardId=${card.id}, 释放账号数=${allocatedAccounts.length}`,
+        error
+      );
       for (const account of allocatedAccounts) {
         await releaseAccount(account.id);
       }
