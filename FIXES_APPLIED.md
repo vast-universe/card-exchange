@@ -162,6 +162,59 @@ WHERE delivery_ref IS NOT NULL;
 
 ---
 
+### 6. Token 失效账号换号逻辑增强
+**文件**: `lib/exchange.ts`
+
+**修复内容**:
+- 增强 `needsReplacement` 判断逻辑，支持识别 Token 失效的情况
+- 修复了 "Authentication required or access denied" 错误无法触发换号的问题
+- 现在可以正确识别三种需要换号的情况
+
+**修复前**:
+```typescript
+const needsReplacement =
+  checkStatus === "banned" ||
+  (liveCheck.quota !== null && liveCheck.quota.remaining === 0);
+```
+
+**问题**:
+- 只能识别明确的 `banned` 状态
+- 只能识别额度为 0 的情况
+- 无法识别 Token 失效（`runtimeStatus === "invalid"`）的情况
+- 当账号返回 "Authentication required or access denied" 时，无法触发换号
+
+**修复后**:
+```typescript
+// 判断账号是否需要换号：
+// 1. 被封禁 (banned)
+// 2. Token 失效 (invalid)
+// 3. 额度为 0
+const needsReplacement =
+  checkStatus === "banned" ||
+  liveCheck.runtimeStatus === "invalid" ||
+  (liveCheck.quota !== null && liveCheck.quota.remaining === 0);
+```
+
+**效果**:
+- ✅ 能识别账号被封禁（`banned`）
+- ✅ 能识别 Token 失效（`invalid`）- **新增**
+- ✅ 能识别额度为 0
+- ✅ 保持质保时间和售后次数的限制不变
+
+**业务规则**:
+```typescript
+const canReplace =
+  needsReplacement &&        // 账号需要换号
+  aftersaleLeft > 0 &&       // 有剩余售后次数
+  !warranty.warrantyExpired; // 质保未过期
+```
+
+**相关文档**:
+- `FIX_INVALID_TOKEN_REPLACEMENT.md` - 详细的修复说明
+- `FIX_ZERO_QUOTA_ISSUE.md` - 问题分析和解决方案
+
+---
+
 ## 📋 需要后续处理的事项
 
 ### 1. 应用新的数据库迁移
@@ -278,6 +331,17 @@ try {
 
 ## 📝 总结
 
-本次修复解决了 5 个关键问题，提升了系统的稳定性、安全性和可维护性。所有修复都经过了语法检查，没有引入新的错误。
+本次修复解决了 **6 个关键问题**，提升了系统的稳定性、安全性和可维护性。所有修复都经过了语法检查和构建测试，没有引入新的错误。
+
+### 修复概览
+
+| # | 问题 | 优先级 | 状态 | 文件 |
+|---|------|--------|------|------|
+| 1 | 仪表盘统计数据不准确 | P0 | ✅ 已修复 | lib/dashboard.ts |
+| 2 | 卡密锁定时间过短 | P1 | ✅ 已修复 | lib/cards.ts |
+| 3 | 环境变量安全性 | P1 | ✅ 已修复 | lib/env.ts |
+| 4 | 多账号分配错误处理 | P1 | ✅ 已修复 | lib/exchange.ts |
+| 5 | 外部供货API幂等性 | P0 | ✅ 已修复 | migrations/0008_delivery_ref_unique.sql |
+| 6 | Token失效换号逻辑 | P1 | ✅ 已修复 | lib/exchange.ts |
 
 建议在部署后持续监控系统运行状况，并根据 `BUG_REPORT.md` 中的优先级逐步修复其他问题。
