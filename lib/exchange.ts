@@ -306,7 +306,7 @@ export async function redeemCardByCode(cardCode: string) {
       );
     }
 
-    // Allocate accounts
+    // Allocate accounts in parallel for better performance
     const allocatedAccounts: Array<{
       id: number;
       payload_raw: string;
@@ -314,17 +314,29 @@ export async function redeemCardByCode(cardCode: string) {
     }> = [];
 
     try {
-      for (let i = 0; i < accountQuantity; i += 1) {
-        const account = await claimVerifiedAvailableAccount(card.pool_code);
-
-        if (!account) {
-          throw new AppError(
-            `账号分配失败，已分配 ${i} / ${accountQuantity} 个账号。`,
-            409,
-          );
+      // Parallel allocation with concurrency limit
+      const BATCH_SIZE = 5; // Process 5 accounts at a time
+      
+      for (let i = 0; i < accountQuantity; i += BATCH_SIZE) {
+        const batchSize = Math.min(BATCH_SIZE, accountQuantity - i);
+        const batchPromises = Array.from({ length: batchSize }, () =>
+          claimVerifiedAvailableAccount(card.pool_code)
+        );
+        
+        const batchResults = await Promise.all(batchPromises);
+        
+        for (let j = 0; j < batchResults.length; j += 1) {
+          const account = batchResults[j];
+          
+          if (!account) {
+            throw new AppError(
+              `账号分配失败，已分配 ${i + j} / ${accountQuantity} 个账号。`,
+              409,
+            );
+          }
+          
+          allocatedAccounts.push(account);
         }
-
-        allocatedAccounts.push(account);
       }
 
       // Add all accounts to card_account_pool

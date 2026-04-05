@@ -664,77 +664,65 @@ export async function issueCardsForExternal(input: {
   const deliveredAt = nowIso();
   const issuedCards: RecentCardRecord[] = [];
 
-  // Generate 1 card with N accounts
+  // Generate 1 card with N accounts - always create new card for performance
   const accountQuantity = count;
   const aftersaleLimit = count; // Set aftersale limit equal to account quantity
 
   try {
-    // Try to reserve an existing card first
-    let card = await reserveNextCardForDelivery({
-      poolCode,
-      deliveryRef,
-      deliveredAt,
-      accountQuantity,
-    });
+    // Directly generate a new card for best performance
+    const prefix = formatAccountTypePrefix(poolCode);
+    const code = createCardCode(prefix);
+    const codeHash = await hashCardCode(code);
+    const createdAt = nowIso();
 
-    // If no existing card found, generate a new one on-the-fly
+    const card = await queryFirst<RecentCardRecord>(
+      `
+        INSERT INTO cards (
+          code_plain,
+          code_hash,
+          pool_code,
+          account_quantity,
+          aftersale_limit,
+          aftersale_used,
+          warranty_hours,
+          status,
+          created_at,
+          delivery_ref,
+          delivered_at,
+          order_amount
+        )
+        VALUES (?, ?, ?, ?, ?, 0, ?, 'normal', ?, ?, ?, ?)
+        RETURNING
+          id,
+          code_plain,
+          pool_code,
+          delivery_ref,
+          delivered_at,
+          aftersale_limit,
+          aftersale_used,
+          warranty_hours,
+          warranty_started_at,
+          warranty_expires_at,
+          status,
+          created_at,
+          account_quantity
+      `,
+      [
+        code,
+        codeHash,
+        poolCode,
+        accountQuantity,
+        aftersaleLimit,
+        warrantyHours,
+        createdAt,
+        deliveryRef,
+        deliveredAt,
+        orderAmount,
+      ],
+    );
+
     if (!card) {
-      const prefix = formatAccountTypePrefix(poolCode);
-      const code = createCardCode(prefix);
-      const codeHash = await hashCardCode(code);
-      const createdAt = nowIso();
-
-      const result = await queryFirst<RecentCardRecord>(
-        `
-          INSERT INTO cards (
-            code_plain,
-            code_hash,
-            pool_code,
-            account_quantity,
-            aftersale_limit,
-            aftersale_used,
-            warranty_hours,
-            status,
-            created_at,
-            delivery_ref,
-            delivered_at,
-            order_amount
-          )
-          VALUES (?, ?, ?, ?, ?, 0, ?, 'normal', ?, ?, ?, ?)
-          RETURNING
-            id,
-            code_plain,
-            pool_code,
-            delivery_ref,
-            delivered_at,
-            aftersale_limit,
-            aftersale_used,
-            warranty_hours,
-            warranty_started_at,
-            warranty_expires_at,
-            status,
-            created_at,
-            account_quantity
-        `,
-        [
-          code,
-          codeHash,
-          poolCode,
-          accountQuantity,
-          aftersaleLimit,
-          warrantyHours,
-          createdAt,
-          deliveryRef,
-          deliveredAt,
-          orderAmount,
-        ],
-      );
-
-      if (!result) {
-        throw new AppError("生成卡密失败。", 500);
-      }
-
-      card = result;
+      throw new AppError("生成卡密失败。", 500);
     }
 
     issuedCards.push(card);
