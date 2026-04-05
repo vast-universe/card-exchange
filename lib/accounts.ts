@@ -578,7 +578,9 @@ export async function listAdminAccounts(input: {
 }
 
 export async function claimAvailableAccount(poolCode: string) {
-  return queryFirst<AccountRecord>(
+  // 使用 UPDATE ... RETURNING 确保原子性
+  // 在 D1 中，这个操作是原子的，不会有两个请求获取到同一个账号
+  const account = await queryFirst<AccountRecord>(
     `
       UPDATE accounts
       SET stock_status = 'bound'
@@ -595,9 +597,20 @@ export async function claimAvailableAccount(poolCode: string) {
     `,
     [poolCode],
   );
+
+  // 如果成功分配，记录日志
+  if (account) {
+    console.log(
+      `[claimAvailableAccount] 成功分配账号: accountId=${account.id}, poolCode=${poolCode}`
+    );
+  }
+
+  return account;
 }
 
 export async function releaseAccount(accountId: number) {
+  console.log(`[releaseAccount] 释放账号: accountId=${accountId}`);
+  
   await execute(
     `
       UPDATE accounts

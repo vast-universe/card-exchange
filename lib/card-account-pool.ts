@@ -39,6 +39,10 @@ export async function allocateAccountsToCard(input: {
     throw new AppError("账号列表不能为空。", 400);
   }
 
+  console.log(
+    `[allocateAccountsToCard] 开始分配: cardId=${input.cardId}, 账号数=${input.accountIds.length}`
+  );
+
   const createdAt = nowIso();
   const statements = input.accountIds.map((accountId, index) => ({
     sql: `
@@ -53,7 +57,27 @@ export async function allocateAccountsToCard(input: {
     bindings: [input.cardId, accountId, index + 1, createdAt],
   }));
 
-  await executeBatch(statements);
+  try {
+    await executeBatch(statements);
+    console.log(
+      `[allocateAccountsToCard] 分配成功: cardId=${input.cardId}, 账号数=${input.accountIds.length}`
+    );
+  } catch (error) {
+    console.error(
+      `[allocateAccountsToCard] 分配失败: cardId=${input.cardId}, 账号数=${input.accountIds.length}`,
+      error
+    );
+    
+    // 检查是否是唯一约束冲突
+    if (error instanceof Error && error.message?.includes('UNIQUE constraint failed')) {
+      throw new AppError(
+        "账号分配冲突，可能该账号已被其他卡密使用，请重试。",
+        409
+      );
+    }
+    
+    throw error;
+  }
 }
 
 /**
