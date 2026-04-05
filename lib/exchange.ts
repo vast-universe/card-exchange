@@ -667,12 +667,21 @@ export async function getSupportSnapshot(cardCode: string) {
 
     const aftersaleLeft = Math.max(0, card.aftersale_limit - card.aftersale_used);
 
+    // 判断账号是否需要换号：
+    // 1. 被封禁 (banned)
+    // 2. Token 失效 (invalid)
+    // 3. 额度为 0
+    const needsReplacement =
+      checkStatus === "banned" ||
+      liveCheck.runtimeStatus === "invalid" ||
+      (liveCheck.quota !== null && liveCheck.quota.remaining === 0);
+
     return {
       payloadRaw,
       checkStatus,
       aftersaleLeft,
       canReplace:
-        checkStatus === "banned" &&
+        needsReplacement &&
         aftersaleLeft > 0 &&
         !warranty.warrantyExpired,
       checkSource: liveCheck.supported ? "live" : "stored",
@@ -883,9 +892,23 @@ export async function replaceCardAccount(cardCode: string) {
       targetAccount.check_status = liveCheck.checkStatus;
     }
 
-    // 检查账号是否被封禁
-    if (targetAccount.check_status !== "banned") {
-      throw new AppError("当前账号还没有被标记为封禁。", 409);
+    // 检查账号是否需要换号：
+    // 1. 被封禁 (banned)
+    // 2. Token 失效 (invalid)
+    // 3. 额度为 0
+    const needsReplacement =
+      targetAccount.check_status === "banned" ||
+      liveCheck.runtimeStatus === "invalid" ||
+      (liveCheck.quota !== null && liveCheck.quota.remaining === 0);
+
+    if (!needsReplacement) {
+      const quotaInfo = liveCheck.quota
+        ? `（剩余额度：${liveCheck.quota.remaining}）`
+        : "";
+      throw new AppError(
+        `当前账号状态正常且有可用额度，无需换号${quotaInfo}。`,
+        409
+      );
     }
 
     // 检查售后次数
