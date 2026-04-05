@@ -29,6 +29,15 @@ import { checkKiroAccountLive } from "@/lib/kiro-portal";
 import type { ActiveBindingRecord, BindingKind, CardRecord } from "@/lib/types";
 import { AppError, nowIso } from "@/lib/utils";
 
+// ============================================================================
+// DEPRECATED: Legacy bindings table functions
+// These functions are kept for backward compatibility and data migration
+// New code should use card_account_pool table functions instead
+// ============================================================================
+
+/**
+ * @deprecated Use getActiveAccountsForCard from card-account-pool.ts instead
+ */
 async function getActiveBinding(cardId: number) {
   return queryFirst<ActiveBindingRecord>(
     `
@@ -56,6 +65,9 @@ async function getActiveBinding(cardId: number) {
   );
 }
 
+/**
+ * @deprecated Use allocateAccountsToCard from card-account-pool.ts instead
+ */
 async function createBinding(
   cardId: number,
   accountId: number,
@@ -77,6 +89,9 @@ async function createBinding(
   return binding.id;
 }
 
+/**
+ * @deprecated Use replaceAccount from card-account-pool.ts instead
+ */
 async function endBinding(bindingId: number) {
   await execute(
     `
@@ -88,6 +103,9 @@ async function endBinding(bindingId: number) {
   );
 }
 
+/**
+ * @deprecated No longer needed with card_account_pool table
+ */
 async function reactivateBinding(bindingId: number) {
   await execute(
     `
@@ -98,6 +116,10 @@ async function reactivateBinding(bindingId: number) {
     [bindingId],
   );
 }
+
+// ============================================================================
+// End of deprecated functions
+// ============================================================================
 
 async function getCardByCodeOrThrow(cardCode: string) {
   const normalizedCode = cardCode.trim();
@@ -818,35 +840,61 @@ export async function replaceCardAccount(cardCode: string) {
   }
 
   try {
-    const activeBinding = await getActiveBinding(card.id);
-    if (!activeBinding) {
+    console.log(`[replaceCardAccount] 开始换号: cardCode=${cardCode}, cardId=${card.id}`);
+
+    // 检查是否有账号分配（统一使用 card_account_pool）
+    const hasAccounts = await hasAccountsAllocated(card.id);
+    if (!hasAccounts) {
+      throw new AppError("这张卡还没有绑定账号，请先去兑换。", 404);
+    }
+
+    // 获取所有激活的账号
+    const activeAccounts = await getActiveAccountsForCard(card.id);
+    if (activeAccounts.length === 0) {
       throw new AppError("当前没有可售后的绑定账号。", 404);
     }
 
+    // 对于单账号卡密，使用第一个账号
+    // 对于多账号卡密，需要指定要换哪个账号（暂时使用第一个被封禁的）
+    let targetAccount = activeAccounts[0];
+    
+    // 如果是多账号卡密，找到第一个被封禁的账号
+    if (card.account_quantity > 1) {
+      const bannedAccount = activeAccounts.find(acc => acc.check_status === 'banned');
+      if (bannedAccount) {
+        targetAccount = bannedAccount;
+      }
+    }
+
+    // 实时检查账号状态
     const liveCheck = await checkKiroAccountLive(
-      activeBinding.card_pool_code,
-      activeBinding.payload_raw,
+      card.pool_code,
+      targetAccount.payload_raw,
     );
 
-    if (liveCheck.payloadRaw !== activeBinding.payload_raw) {
-      await replaceAccountPayloadRaw(activeBinding.account_id, liveCheck.payloadRaw);
-      activeBinding.payload_raw = liveCheck.payloadRaw;
+    // 更新账号信息
+    if (liveCheck.payloadRaw !== targetAccount.payload_raw) {
+      await replaceAccountPayloadRaw(targetAccount.account_id, liveCheck.payloadRaw);
+      targetAccount.payload_raw = liveCheck.payloadRaw;
     }
 
-    if (liveCheck.supported && liveCheck.checkStatus !== activeBinding.check_status) {
-      await setAccountCheckStatus(activeBinding.account_id, liveCheck.checkStatus);
-      activeBinding.check_status = liveCheck.checkStatus;
+    if (liveCheck.supported && liveCheck.checkStatus !== targetAccount.check_status) {
+      await setAccountCheckStatus(targetAccount.account_id, liveCheck.checkStatus);
+      targetAccount.check_status = liveCheck.checkStatus;
     }
 
-    if (activeBinding.check_status !== "banned") {
+    // 检查账号是否被封禁
+    if (targetAccount.check_status !== "banned") {
       throw new AppError("当前账号还没有被标记为封禁。", 409);
     }
 
+    // 检查售后次数
     const aftersaleLeft = card.aftersale_limit - card.aftersale_used;
     if (aftersaleLeft <= 0) {
       throw new AppError("售后次数已经用完。", 409);
     }
 
+    // 检查质保时间
     let warrantyStartedAt = card.warranty_started_at;
     let warrantyExpiresAt = card.warranty_expires_at;
 
@@ -870,52 +918,49 @@ export async function replaceCardAccount(cardCode: string) {
       throw new AppError("质保时间已过，不能再换号。", 409);
     }
 
+    // 分配新账号
     const replacement = await claimVerifiedAvailableAccount(card.pool_code);
     if (!replacement) {
       throw new AppError("当前没有可更换的新账号。", 409);
     }
 
     try {
-      await endBinding(activeBinding.binding_id);
-      let replacementBindingId: number | null = null;
-      let previousAccountDisabled = false;
+      // 使用 card_account_pool 的 replaceAccount 函数
+      const newPosition = await replaceAccount({
+        cardId: card.id,
+        oldPosition: targetAccount.position,
+        newAccountId: replacement.id,
+      });
 
-      try {
-        replacementBindingId = await createBinding(
-          card.id,
-          replacement.id,
-          "replace",
-        );
-      } catch (error) {
-        await reactivateBinding(activeBinding.binding_id);
-        await releaseAccount(replacement.id);
-        throw error;
-      }
+      console.log(
+        `[replaceCardAccount] 账号替换成功: ` +
+        `oldAccountId=${targetAccount.account_id}, ` +
+        `newAccountId=${replacement.id}, ` +
+        `oldPosition=${targetAccount.position}, ` +
+        `newPosition=${newPosition}`
+      );
 
-      try {
-        await disableAccount(activeBinding.account_id);
-        previousAccountDisabled = true;
-        await incrementAftersaleUsed(card.id);
-      } catch (error) {
-        if (replacementBindingId) {
-          await endBinding(replacementBindingId);
-        }
-        if (previousAccountDisabled) {
-          await markAccountBound(activeBinding.account_id);
-        }
-        await reactivateBinding(activeBinding.binding_id);
-        await releaseAccount(replacement.id);
-        throw error;
-      }
+      // 禁用旧账号
+      await disableAccount(targetAccount.account_id);
+
+      // 增加售后使用次数
+      await incrementAftersaleUsed(card.id);
+
+      return {
+        payloadRaw: replacement.payload_raw,
+        aftersaleLeft: aftersaleLeft - 1,
+        position: newPosition,
+        oldPosition: targetAccount.position,
+      };
     } catch (error) {
+      // 回滚：释放新分配的账号
+      console.error(
+        `[replaceCardAccount] 换号失败，释放账号: accountId=${replacement.id}`,
+        error
+      );
       await releaseAccount(replacement.id);
       throw error;
     }
-
-    return {
-      payloadRaw: replacement.payload_raw,
-      aftersaleLeft: aftersaleLeft - 1,
-    };
   } finally {
     await releaseCardLock(card.id);
   }
