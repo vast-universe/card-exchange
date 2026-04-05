@@ -1,0 +1,33 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "card-exchange",
+  "account_id": "aadba9169aa9411be739d7e5681045cd",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-04-01",
+  "compatibility_flags": ["nodejs_compat", "global_fetch_strictly_public"],
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    {
+      "binding": "WORKER_SELF_REFERENCE",
+      "service": "card-exchange"
+    }
+  ],
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "card-exchange",
+      "database_id": "df5204ab-bd73-415a-a079-923af228829c",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "TURNSTILE_SITE_KEY": "0x4AAAAAACy2J2DrrEs9SH1y",
+    "TURNSTILE_ENABLED": "false"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

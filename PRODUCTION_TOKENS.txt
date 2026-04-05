@@ -1,0 +1,31 @@
+# 生产环境密钥配置
+
+## Cloudflare Workers 已配置密钥
+
+✅ ADMIN_PASSWORD - 管理员密码
+✅ CARD_HASH_SECRET - 卡密哈希密钥
+✅ SESSION_SECRET - 会话密钥
+✅ TURNSTILE_SECRET_KEY - Turnstile 验证密钥
+✅ SUPPLY_API_TOKEN - 供货 API Token
+
+## SUPPLY_API_TOKEN 值
+
+```
+c59fc5b183693989e323494f72e92cb2d545c25fffefa4ffd29d7b87d69fc512
+```
+
+## 速率限制配置
+
+生产环境默认启用速率限制（未设置 RATE_LIMIT_ENABLED 时）
+- 兑换: 1 分钟 30 次
+- 售后查询: 1 分钟 30 次
+- 换号: 1 分钟 30 次
+- 卡密提交: 1 分钟 30 次
+- 管理员登录: 10 分钟 5 次失败尝试
+
+## 注意事项
+
+1. 所有密钥已通过 `wrangler secret put` 配置到 Cloudflare Workers
+2. 本地开发使用 `.dev.vars` 文件
+3. 生产环境不需要配置 RATE_LIMIT_ENABLED（默认启用）
+4. 如需禁用速率限制，设置 `RATE_LIMIT_ENABLED=false`
