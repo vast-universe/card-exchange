@@ -148,25 +148,25 @@ function buildAdminCardsWhere(input: {
 
   if (input.usage === "unused") {
     clauses.push(
-      "NOT EXISTS (SELECT 1 FROM bindings used_bindings WHERE used_bindings.card_id = cards.id) AND cards.delivered_at IS NULL",
+      "NOT EXISTS (SELECT 1 FROM card_account_pool used_pool WHERE used_pool.card_id = cards.id) AND cards.delivered_at IS NULL",
     );
   }
 
   if (input.usage === "used") {
     clauses.push(
-      "EXISTS (SELECT 1 FROM bindings used_bindings WHERE used_bindings.card_id = cards.id)",
+      "EXISTS (SELECT 1 FROM card_account_pool used_pool WHERE used_pool.card_id = cards.id)",
     );
   }
 
   if (input.usage === "issued") {
     clauses.push(
-      "NOT EXISTS (SELECT 1 FROM bindings used_bindings WHERE used_bindings.card_id = cards.id) AND cards.delivered_at IS NOT NULL",
+      "NOT EXISTS (SELECT 1 FROM card_account_pool used_pool WHERE used_pool.card_id = cards.id) AND cards.delivered_at IS NOT NULL",
     );
   }
 
   if (input.usage === "bound") {
     clauses.push(
-      "EXISTS (SELECT 1 FROM bindings active_bindings WHERE active_bindings.card_id = cards.id AND active_bindings.status = 'active')",
+      "EXISTS (SELECT 1 FROM card_account_pool active_pool WHERE active_pool.card_id = cards.id AND active_pool.status = 'active')",
     );
   }
 
@@ -192,19 +192,20 @@ async function getAdminCardRow(cardId: number) {
         cards.warranty_expires_at,
         cards.status,
         cards.created_at,
-        active_bindings.account_id AS active_account_id,
+        cards.account_quantity,
+        active_pool.account_id AS active_account_id,
         active_accounts.payload_raw AS active_account_payload_raw,
         active_accounts.check_status AS active_account_check_status,
         CASE
           WHEN EXISTS(
             SELECT 1
-            FROM bindings all_bindings
-            WHERE all_bindings.card_id = cards.id
+            FROM card_account_pool all_pool
+            WHERE all_pool.card_id = cards.id
           ) THEN 1
           ELSE 0
         END AS has_bindings,
         CASE
-          WHEN active_bindings.id IS NULL THEN 0
+          WHEN active_pool.id IS NULL THEN 0
           ELSE 1
         END AS has_active_binding,
         CASE
@@ -213,11 +214,11 @@ async function getAdminCardRow(cardId: number) {
           ELSE 0
         END AS aftersale_left
       FROM cards
-      LEFT JOIN bindings active_bindings
-        ON active_bindings.card_id = cards.id
-       AND active_bindings.status = 'active'
+      LEFT JOIN card_account_pool active_pool
+        ON active_pool.card_id = cards.id
+       AND active_pool.status = 'active'
       LEFT JOIN accounts active_accounts
-        ON active_accounts.id = active_bindings.account_id
+        ON active_accounts.id = active_pool.account_id
       WHERE cards.id = ?
       LIMIT 1
     `,
@@ -262,19 +263,20 @@ export async function listAdminCards(input: {
         cards.warranty_expires_at,
         cards.status,
         cards.created_at,
-        active_bindings.account_id AS active_account_id,
+        cards.account_quantity,
+        active_pool.account_id AS active_account_id,
         active_accounts.payload_raw AS active_account_payload_raw,
         active_accounts.check_status AS active_account_check_status,
         CASE
           WHEN EXISTS(
             SELECT 1
-            FROM bindings all_bindings
-            WHERE all_bindings.card_id = cards.id
+            FROM card_account_pool all_pool
+            WHERE all_pool.card_id = cards.id
           ) THEN 1
           ELSE 0
         END AS has_bindings,
         CASE
-          WHEN active_bindings.id IS NULL THEN 0
+          WHEN active_pool.id IS NULL THEN 0
           ELSE 1
         END AS has_active_binding,
         CASE
@@ -283,11 +285,11 @@ export async function listAdminCards(input: {
           ELSE 0
         END AS aftersale_left
       FROM cards
-      LEFT JOIN bindings active_bindings
-        ON active_bindings.card_id = cards.id
-       AND active_bindings.status = 'active'
+      LEFT JOIN card_account_pool active_pool
+        ON active_pool.card_id = cards.id
+       AND active_pool.status = 'active'
       LEFT JOIN accounts active_accounts
-        ON active_accounts.id = active_bindings.account_id
+        ON active_accounts.id = active_pool.account_id
       ${filter.where}
       ORDER BY cards.id DESC
       LIMIT ?
@@ -471,10 +473,10 @@ export async function backfillCardWarrantyFromBindings(
   cardId: number,
   warrantyHours: number,
 ) {
-  const firstBinding = await queryFirst<{ created_at: string }>(
+  const firstAllocation = await queryFirst<{ created_at: string }>(
     `
       SELECT created_at
-      FROM bindings
+      FROM card_account_pool
       WHERE card_id = ?
       ORDER BY created_at ASC
       LIMIT 1
@@ -482,14 +484,14 @@ export async function backfillCardWarrantyFromBindings(
     [cardId],
   );
 
-  if (!firstBinding) {
+  if (!firstAllocation) {
     return null;
   }
 
   return initializeCardWarranty({
     cardId,
     warrantyHours,
-    startedAt: firstBinding.created_at,
+    startedAt: firstAllocation.created_at,
   });
 }
 
@@ -542,11 +544,6 @@ async function reserveNextCardForDelivery(input: {
           AND cards.delivery_ref IS NULL
           AND cards.delivered_at IS NULL
           AND cards.account_quantity = ?
-          AND NOT EXISTS(
-            SELECT 1
-            FROM bindings
-            WHERE bindings.card_id = cards.id
-          )
           AND NOT EXISTS(
             SELECT 1
             FROM card_account_pool

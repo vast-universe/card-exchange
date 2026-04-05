@@ -481,20 +481,20 @@ async function getAdminAccountRow(accountId: number) {
         accounts.stock_status,
         accounts.check_status,
         accounts.created_at,
-        active_bindings.card_id AS active_card_id,
-        active_bindings.kind AS active_binding_kind,
+        active_pool.card_id AS active_card_id,
+        NULL AS active_binding_kind,
         CASE
           WHEN EXISTS(
             SELECT 1
-            FROM bindings all_bindings
-            WHERE all_bindings.account_id = accounts.id
+            FROM card_account_pool all_pool
+            WHERE all_pool.account_id = accounts.id
           ) THEN 1
           ELSE 0
         END AS has_bindings
       FROM accounts
-      LEFT JOIN bindings active_bindings
-        ON active_bindings.account_id = accounts.id
-       AND active_bindings.status = 'active'
+      LEFT JOIN card_account_pool active_pool
+        ON active_pool.account_id = accounts.id
+       AND active_pool.status = 'active'
       WHERE accounts.id = ?
       LIMIT 1
     `,
@@ -547,20 +547,20 @@ export async function listAdminAccounts(input: {
         accounts.stock_status,
         accounts.check_status,
         accounts.created_at,
-        active_bindings.card_id AS active_card_id,
-        active_bindings.kind AS active_binding_kind,
+        active_pool.card_id AS active_card_id,
+        NULL AS active_binding_kind,
         CASE
           WHEN EXISTS(
             SELECT 1
-            FROM bindings all_bindings
-            WHERE all_bindings.account_id = accounts.id
+            FROM card_account_pool all_pool
+            WHERE all_pool.account_id = accounts.id
           ) THEN 1
           ELSE 0
         END AS has_bindings
       FROM accounts
-      LEFT JOIN bindings active_bindings
-        ON active_bindings.account_id = accounts.id
-       AND active_bindings.status = 'active'
+      LEFT JOIN card_account_pool active_pool
+        ON active_pool.account_id = accounts.id
+       AND active_pool.status = 'active'
       ${filter.where}
       ORDER BY accounts.id DESC
       LIMIT ?
@@ -767,7 +767,7 @@ export async function deleteAccount(accountId: number) {
   }
 
   if (account.has_bindings > 0) {
-    throw new AppError("当前账号已有绑定历史，不能删除。", 409);
+    throw new AppError("当前账号已有使用历史，不能删除。", 409);
   }
 
   await execute(

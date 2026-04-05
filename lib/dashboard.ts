@@ -36,8 +36,8 @@ export async function getDashboardStats(): Promise<DashboardStats> {
           WHEN cards.delivered_at IS NULL
             AND NOT EXISTS(
               SELECT 1
-              FROM bindings
-              WHERE bindings.card_id = cards.id
+              FROM card_account_pool
+              WHERE card_account_pool.card_id = cards.id
             ) THEN 1
           ELSE 0
         END
@@ -47,15 +47,15 @@ export async function getDashboardStats(): Promise<DashboardStats> {
           WHEN cards.delivered_at IS NOT NULL
             AND NOT EXISTS(
               SELECT 1
-              FROM bindings
-              WHERE bindings.card_id = cards.id
+              FROM card_account_pool
+              WHERE card_account_pool.card_id = cards.id
             ) THEN 1
           ELSE 0
         END
       ) AS issued,
       (
         SELECT COUNT(DISTINCT card_id)
-        FROM bindings
+        FROM card_account_pool
       ) AS used
     FROM cards
   `);
@@ -65,9 +65,9 @@ export async function getDashboardStats(): Promise<DashboardStats> {
     replaceCount: number | string;
   }>(`
     SELECT
-      SUM(CASE WHEN kind = 'redeem' AND date(created_at, '+8 hours') = date('now', '+8 hours') THEN 1 ELSE 0 END) AS redeemCount,
-      SUM(CASE WHEN kind = 'replace' AND date(created_at, '+8 hours') = date('now', '+8 hours') THEN 1 ELSE 0 END) AS replaceCount
-    FROM bindings
+      COUNT(DISTINCT CASE WHEN status = 'active' AND date(created_at, '+8 hours') = date('now', '+8 hours') THEN card_id END) AS redeemCount,
+      COUNT(DISTINCT CASE WHEN status = 'replaced' AND date(replaced_at, '+8 hours') = date('now', '+8 hours') THEN card_id END) AS replaceCount
+    FROM card_account_pool
   `);
 
   const todayDelivery = await queryFirst<{
